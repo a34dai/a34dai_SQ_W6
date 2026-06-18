@@ -21,8 +21,37 @@
 // The world is larger than the canvas. The camera follows
 // the player so only part of the world is visible at once.
 // ------------------------------------------------------------
+const DIR_VECTORS = {
+  up:    { x: 0,  y: -1 },
+  down:  { x: 0,  y: 1 },
+  left:  { x: -1, y: 0 },
+  right: { x: 1,  y: 0 },
+};
+
 const WORLD_W = 1600; // total world width in pixels
 const WORLD_H = 2000; // total world height in pixels
+
+const WEREWOLFSPRITE = { //werewolf 144 x256
+  frameWidth:  48,
+  frameHeight: 64,
+  numFrames:   3,
+  animSpeed:   13,
+  scale:       1.4,
+  rows: {
+    up:  0,
+    right:    1,
+    down: 2,
+    left:  3,
+  },
+  offsets: {
+    down:  { x: 0, y: 30  },
+    up:    { x: 0, y: 30  },
+    right: { x: 0, y: 30 },
+    left:  { x: 0, y: 30 },
+  },
+};
+
+
 
 // ------------------------------------------------------------
 // CAMERA
@@ -39,7 +68,7 @@ const CAM_SMOOTHING = 0.1;
 // ------------------------------------------------------------
 const PLAYER_SPEED = 3;
 const BULLET_SPEED = 10;
-const SHOOT_COOLDOWN = 12;
+const SHOOT_COOLDOWN = 17;
 const INVINCIBLE_FRAMES = 90;
 
 // ------------------------------------------------------------
@@ -51,8 +80,12 @@ let player = {
   x: WORLD_W / 2,
   y: WORLD_H - 200,
   r: 22,
-  blobT: 0,
-  direction: { x: 0, y: -1 },
+
+  currentFrame: 0,
+  frameTimer: 0,
+  direction: "down",
+  isMoving: false,
+
   shootTimer: 0,
   health: 5,
   maxHealth: 5,
@@ -61,6 +94,24 @@ let player = {
   bounceVX: 0,
   bounceVY: 0,
 };
+
+let VIL_FRAME_W;
+let VIL_FRAME_H;
+const VIL_COLS    = 3;
+
+const VIL_DRAW_W  = 50;
+const VIL_DRAW_H  = 60;
+
+const VIL_ROWS = {
+  down:  0,
+  right: 1,
+  up:    2,
+  left:  3,
+};
+// Horizontal correction offsets for each animation frame
+// Tune these numbers until the villager stops drifting
+const VIL_XOFF = [6, 0, -10];  // 4 frames per row
+
 
 // ------------------------------------------------------------
 // BULLETS and ENEMIES
@@ -95,12 +146,6 @@ let bossData = null;
 const BOSS_ZONE_Y = 300; // world Y — enter this zone to trigger boss
 
 // ------------------------------------------------------------
-// BACKGROUND SHAPES
-// Scattered across the world — drawn in world coordinates.
-// ------------------------------------------------------------
-let bgShapes = [];
-
-// ------------------------------------------------------------
 // MINIMAP
 // Drawn in screen coordinates after pop().
 // Shows a scaled-down version of the world with dots for
@@ -125,31 +170,19 @@ let gameState = STATE_PLAY;
 // sprite sheets
 let werewolfImg;
 let villagerImg;
+// bg 
+let groundImg;
 
-const WW_FRAME_W   = 48;
-const WW_FRAME_H   = 64;
-const WW_COLS      = 3;
-const WW_DIR_ROW   = { N: 0, E: 1, S: 2, W: 3 };
-
-const VIL_FRAME_W  = 745 / 3;        // ≈ 248.33
-const VIL_FRAME_H  = 1141 / 4;       // ≈ 285.25
-const VIL_COLS     = 3;
-const VIL_DIR_ROW  = { S: 0, E: 1, N: 2, W: 3 };
-
-const WW_DRAW_W    = 48;
-const WW_DRAW_H    = 64;
-const VIL_DRAW_W   = 50;
-const VIL_DRAW_H   = 60;
 // ------------------------------------------------------------
 // SOUNDS — uncomment and fill in paths to add audio
 // ------------------------------------------------------------
-// let shootSound;
+let shootSounds = [];
 // let hitSound;
-// let playerHitSound;
+let playerHitSounds = [];
 // let bossHitSound;
-// let bossMusic;
+let bossMusic;
 // let winSound;
-// let music;
+let backgroundMusic;
 
 // ============================================================
 // preload()
@@ -157,17 +190,22 @@ const VIL_DRAW_H   = 60;
 function preload() {
   enemyData    = loadJSON("data/enemies.json");
   obstacleData = loadJSON("data/obstacles.json");
-  werewolfImg = loadImage("assets/werewolf.png");
-  villagerImg = loadImage("assets/villager.png");
+  werewolfImg = loadImage("assets/images/werewolf.png");
+  villagerImg = loadImage("assets/images/villager.png");
+  groundImg = loadImage("assets/images/ground.png");
 
   // Uncomment to load sounds:
-  // shootSound     = loadSound("assets/sounds/shoot.wav");
+  for (let i = 1; i <= 3; i++) {
+    shootSounds.push(loadSound("assets/sounds/shoot" + i + ".mp3"));
+  }
   // hitSound       = loadSound("assets/sounds/hit.wav");
-  // playerHitSound = loadSound("assets/sounds/playerhit.wav");
+  for (let i = 1; i <= 2; i++) {
+    playerHitSounds.push(loadSound("assets/sounds/hurt" + i + ".mp3"));
+  }
   // bossHitSound   = loadSound("assets/sounds/bosshit.wav");
-  // bossMusic      = loadSound("assets/sounds/bossmusic.mp3");
+bossMusic      = loadSound("assets/sounds/bossMusic.mp3");
   // winSound       = loadSound("assets/sounds/win.wav");
-  // music          = loadSound("assets/sounds/music.mp3");
+  backgroundMusic          = loadSound("assets/sounds/background.mp3");
 }
 
 // ============================================================
@@ -175,25 +213,16 @@ function preload() {
 // ============================================================
 function setup() {
   createCanvas(800, 450);
+  VIL_FRAME_W = villagerImg.width / 3;
+VIL_FRAME_H = villagerImg.height / 4;
+
   bossData = enemyData.boss;
 
   // Build obstacle objects from JSON
   for (let i = 0; i < obstacleData.obstacles.length; i++) {
     let o = obstacleData.obstacles[i];
     obstacles.push({ x: o.x, y: o.y, size: o.size });
-  }
 
-  // Generate background shapes across the world
-  for (let i = 0; i < 120; i++) {
-    bgShapes.push({
-      x: random(WORLD_W),
-      y: random(WORLD_H),
-      type: random() > 0.5 ? "circle" : "rect",
-      size: random(10, 50),
-      r: floor(random(30, 70)),
-      g: floor(random(30, 70)),
-      b: floor(random(50, 100)),
-    });
   }
 
   // Start camera so player is visible
@@ -201,7 +230,8 @@ function setup() {
   camY = player.y - height / 2;
 
   // Uncomment to start music:
-  // music.loop();
+  backgroundMusic.loop();
+  backgroundMusic.setVolume(2);
 }
 
 // ============================================================
@@ -234,6 +264,7 @@ function draw() {
     drawEnemies();
     drawBullets();
     drawPlayer();
+    animateSprite();
 
   } else if (gameState === STATE_BOSS) {
     handleInput();
@@ -261,53 +292,6 @@ function draw() {
   if (gameState === STATE_OVER) drawGameOver();
 }
 
-// SPRITE HELPERS
-// ============================================================
- 
-// Draw a sprite from a sheet given row/col
-// sheet: p5.Image, frameW/H: source frame size,
-// col/row: which frame, drawX/Y: world position (centre),
-// drawW/H: render size, flip: mirror horizontally
-function drawSpriteFrame(sheet, frameW, frameH, col, row, drawX, drawY, drawW, drawH, flip) {
-  let sx = col * frameW;
-  let sy = row * frameH;
- 
-  push();
-  translate(drawX, drawY);
-  if (flip) {
-    scale(-1, 1);
-  }
-  // Draw centred on (0,0) after translate
-  image(sheet, -drawW / 2, -drawH / 2, drawW, drawH,
-        sx, sy, frameW, frameH);
-  pop();
-}
- 
-// Convert player direction vector → sprite row + flip flag
-function werewolfRowAndFlip(dir) {
-  // Determine dominant axis
-  if (abs(dir.y) >= abs(dir.x)) {
-    if (dir.y < 0) return { row: WW_DIR_ROW["N"], flip: false };
-    else           return { row: WW_DIR_ROW["S"], flip: false };
-  } else {
-    if (dir.x > 0) return { row: WW_DIR_ROW["E"], flip: false };
-    else           return { row: WW_DIR_ROW["W"], flip: false };
-  }
-}
- 
-// Convert enemy-to-player vector → villager row + flip flag
-// We check which direction the villager is facing toward the player
-function villagerRowAndFlip(ex, ey, px, py) {
-  let dx = px - ex;
-  let dy = py - ey;
-  if (abs(dy) >= abs(dx)) {
-    if (dy > 0) return { row: VIL_DIR_ROW["S"], flip: false }; // enemy moving south toward player
-    else        return { row: VIL_DIR_ROW["N"], flip: false };
-  } else {
-    if (dx > 0) return { row: VIL_DIR_ROW["E"], flip: false };
-    else        return { row: VIL_DIR_ROW["W"], flip: false };
-  }
-}
  
 // ------------------------------------------------------------
 // updateCamera()
@@ -329,7 +313,7 @@ function updateCamera() {
 // drawObstacles()
 // Drawn in world coordinates inside push/pop.
 // Only draws obstacles near the camera for performance.
-// ------------------------------------------------------------
+// ----------------------------- -------------------------------
 function drawObstacles() {
   for (let i = 0; i < obstacles.length; i++) {
     let o = obstacles[i];
@@ -351,21 +335,21 @@ function drawObstacles() {
 
     // Outer glow
     noStroke();
-    fill(255, 100, 0, glow);
+    fill(240, 130, 130, glow);
     rect(x - 4, y - 4, s + 8, s + 8, 8);
 
-    // Lava base
-    fill(180, 40, 0);
+    // silver base
+    fill(150, 180, 200);
     rect(x, y, s, s, 4);
 
-    // Lava surface patches
-    fill(220, 80, 10);
+    // silver surface patches
+    fill(200, 230, 250);
     rect(x + s * 0.1, y + s * 0.1, s * 0.4, s * 0.35, 2);
     rect(x + s * 0.55, y + s * 0.5, s * 0.35, s * 0.3, 2);
     rect(x + s * 0.2, y + s * 0.6, s * 0.25, s * 0.25, 2);
 
     // Crack lines
-    stroke(100, 20, 0);
+    stroke(100, 120, 140);
     strokeWeight(1.5);
     line(x + s * 0.3, y, x + s * 0.5, y + s * 0.4);
     line(x + s * 0.5, y + s * 0.4, x + s * 0.7, y + s * 0.6);
@@ -374,7 +358,7 @@ function drawObstacles() {
 
     // Hot edge highlight
     noStroke();
-    fill(255, 140, 0, 180);
+    fill(240, 230, 235, 180);
     rect(x, y, s, 3, 2);
     rect(x, y, 3, s, 2);
 
@@ -411,7 +395,8 @@ function checkObstaclePlayerCollision() {
         player.bounceVY = (dy / len) * 8;
       }
 
-      // playerHitSound.play();
+      let randomHit = playerHitSounds[floor(random(playerHitSounds.length))];
+    randomHit.play(); 
 
       if (player.health <= 0) {
         gameState = STATE_OVER;
@@ -445,22 +430,35 @@ function applyBounce() {
 // ------------------------------------------------------------
 function drawBackground() {
   noStroke();
-  for (let i = 0; i < bgShapes.length; i++) {
-    let s = bgShapes[i];
-
-    // Skip shapes far from the camera view
-    if (
-      s.x < camX - s.size || s.x > camX + width + s.size ||
-      s.y < camY - s.size || s.y > camY + height + s.size
-    ) continue;
-
-    fill(s.r, s.g, s.b, 160);
-
-    if (s.type === "circle") {
-      ellipse(s.x, s.y, s.size);
-    } else {
-      rect(s.x - s.size / 2, s.y - s.size / 2, s.size, s.size, 3);
+  if (groundImg && groundImg.width > 0) {
+    let tW = groundImg.width;
+    let tH = groundImg.height;
+ 
+    // Only tile what's visible + one extra tile buffer
+    let startX = floor(camX / tW) * tW;
+    let startY = floor(camY / tH) * tH;
+    let endX   = camX + width  + tW;
+    let endY   = camY + height + tH;
+ 
+    // Clamp to world bounds
+    startX = max(startX, 0);
+    startY = max(startY, 0);
+    endX   = min(endX, WORLD_W);
+    endY   = min(endY, WORLD_H);
+ 
+    for (let tx = startX; tx < endX; tx += tW) {
+      for (let ty = startY; ty < endY; ty += tH) {
+        // Clip the tile if it overhangs the world edge
+        let drawW = min(tW, WORLD_W - tx);
+        let drawH = min(tH, WORLD_H - ty);
+        image(groundImg, tx, ty, drawW, drawH, 0, 0, drawW, drawH);
+      }
     }
+  } else {
+    // Fallback solid colour if image not yet loaded
+    fill(30, 50, 30);
+    noStroke();
+    rect(0, 0, WORLD_W, WORLD_H);
   }
 
   // World boundary outline
@@ -501,27 +499,58 @@ function drawBossZone() {
 // Spacebar fires in the current facing direction.
 // ------------------------------------------------------------
 function handleInput() {
-  if (keyIsDown(87)) { player.y -= PLAYER_SPEED; player.direction = { x: 0,  y: -1 }; }
-  if (keyIsDown(83)) { player.y += PLAYER_SPEED; player.direction = { x: 0,  y:  1 }; }
-  if (keyIsDown(65)) { player.x -= PLAYER_SPEED; player.direction = { x: -1, y:  0 }; }
-  if (keyIsDown(68)) { player.x += PLAYER_SPEED; player.direction = { x:  1, y:  0 }; }
+  player.isMoving = false;
+  if (keyIsDown(87)) { // W
+  player.y -= PLAYER_SPEED;
+  player.direction = "up";
+  player.isMoving = true;
+}
+if (keyIsDown(83)) { // S
+  player.y += PLAYER_SPEED;
+  player.direction = "down";
+  player.isMoving = true;
+}
+if (keyIsDown(65)) { // A
+  player.x -= PLAYER_SPEED;
+  player.direction = "left";
+  player.isMoving = true;
+}
+if (keyIsDown(68)) { // D
+  player.x += PLAYER_SPEED;
+  player.direction = "right";
+  player.isMoving = true;
+}
+
 
   // Keep player inside world bounds
   player.x = constrain(player.x, player.r, WORLD_W - player.r);
   player.y = constrain(player.y, player.r, WORLD_H - player.r);
 
   if (player.shootTimer > 0) player.shootTimer--;
+const DIR_VECTORS = {
+  up:    { x: 0,  y: -1 },
+  down:  { x: 0,  y: 1 },
+  left:  { x: -1, y: 0 },
+  right: { x: 1,  y: 0 },
+};
 
-  if (keyIsDown(32) && player.shootTimer === 0) {
-    bullets.push({
-      x:  player.x + player.direction.x * (player.r + 4),
-      y:  player.y + player.direction.y * (player.r + 4),
-      vx: player.direction.x * BULLET_SPEED,
-      vy: player.direction.y * BULLET_SPEED,
-    });
-    player.shootTimer = SHOOT_COOLDOWN;
-    // shootSound.play();
-  }
+if (keyIsDown(32) && player.shootTimer === 0) {
+  let dir = DIR_VECTORS[player.direction];
+
+  bullets.push({
+    x:  player.x + dir.x * (player.r + 4),
+    y:  player.y + dir.y * (player.r + 4),
+    vx: dir.x * BULLET_SPEED,
+    vy: dir.y * BULLET_SPEED,
+  });
+
+  player.shootTimer = SHOOT_COOLDOWN;
+  let randomShoot = shootSounds[floor(random(shootSounds.length))];
+    randomShoot.play();
+
+}
+
+  
 }
 
 // ------------------------------------------------------------
@@ -556,12 +585,17 @@ function checkWaveSpawns() {
     for (let i = 0; i < wave.enemies.length; i++) {
       let data = wave.enemies[i];
       enemies.push({
-        x:     random(100, WORLD_W - 100),
-        y:     random(BOSS_ZONE_Y + 50, BOSS_ZONE_Y + 300),
-        r:     20,
-        speed: data.speed,
-        blobT: random(100),
-      });
+  x: random(100, WORLD_W - 100),
+  y: random(BOSS_ZONE_Y + 50, BOSS_ZONE_Y + 300),
+  r: 20,
+  speed: data.speed,
+
+  direction: "down",
+  animFrame: 0,
+  animTimer: 0,
+  animSpeed: 10
+});
+
     }
     nextWave++;
   }
@@ -603,8 +637,8 @@ function spawnBoss() {
   enemies = [];
   gameState = STATE_BOSS;
 
-  // music.stop();
-  // bossMusic.loop();
+  backgroundMusic.stop();
+  bossMusic.loop();
 }
 
 // ------------------------------------------------------------
@@ -613,7 +647,9 @@ function spawnBoss() {
 // ------------------------------------------------------------
 function updateEnemies() {
   for (let i = 0; i < enemies.length; i++) {
-    let e  = enemies[i];
+    let e = enemies[i];
+
+    // Movement toward player
     let dx = player.x - e.x;
     let dy = player.y - e.y;
     let d  = dist(e.x, e.y, player.x, player.y);
@@ -622,8 +658,19 @@ function updateEnemies() {
       e.x += (dx / d) * e.speed;
       e.y += (dy / d) * e.speed;
     }
+
+    // Direction based on movement
+    e.direction = villagerDirection(e.x, e.y, player.x, player.y);
+
+    // Animation
+    e.animTimer++;
+    if (e.animTimer >= e.animSpeed) {
+      e.animTimer = 0;
+      e.animFrame = (e.animFrame + 1) % VIL_COLS;
+    }
   }
 }
+
 
 // ------------------------------------------------------------
 // updateBoss()
@@ -692,7 +739,7 @@ function checkBulletBossCollision() {
       if (boss.health <= 0) {
         gameState = STATE_WIN;
         // winSound.play();
-        // bossMusic.stop();
+        bossMusic.stop();
       }
       break;
     }
@@ -710,11 +757,12 @@ function checkBossPlayerCollision() {
     player.health--;
     player.invincible      = true;
     player.invincibleTimer = INVINCIBLE_FRAMES;
-    // playerHitSound.play();
+    let randomHit = playerHitSounds[floor(random(playerHitSounds.length))];
+    randomHit.play();
 
     if (player.health <= 0) {
       gameState = STATE_OVER;
-      // bossMusic.stop();
+      bossMusic.stop();
     }
   }
 }
@@ -731,7 +779,8 @@ function checkEnemyPlayerCollision() {
       player.health--;
       player.invincible      = true;
       player.invincibleTimer = INVINCIBLE_FRAMES;
-      // playerHitSound.play();
+      let randomHit = playerHitSounds[floor(random(playerHitSounds.length))];
+      randomHit.play();
 
       if (player.health <= 0) {
         gameState = STATE_OVER;
@@ -781,7 +830,7 @@ function drawBoss() {
 
   push();
   let isCharging = boss.state === "charging";
-  fill(isCharging ? color(255, 180, 30) : color(255, 130, 20));
+  fill(isCharging ? color(250, 240, 250) : color(190, 230, 240));
   noStroke();
 
   beginShape();
@@ -812,31 +861,42 @@ function drawBoss() {
 // drawEnemies()
 // Drawn in world coordinates.
 // ------------------------------------------------------------
+function drawSpriteFrame(sheet, frameW, frameH, col, row, drawX, drawY, drawW, drawH) {
+  let sx = col * frameW;
+  let sy = row * frameH;
+
+  push();
+  imageMode(CENTER);
+  image(sheet, drawX, drawY, drawW, drawH, sx, sy, frameW, frameH);
+  pop();
+}
+
 function drawEnemies() {
+  
   for (let i = 0; i < enemies.length; i++) {
     let e = enemies[i];
-    push();
-    fill(255, 150, 30);
-    noStroke();
 
-    beginShape();
-    let numPoints = 48;
-    for (let j = 0; j < numPoints; j++) {
-      let angle    = (TWO_PI / numPoints) * j;
-      let noiseVal = noise(cos(angle) * 0.8 + e.blobT, sin(angle) * 0.8 + e.blobT);
-      let r        = e.r + map(noiseVal, 0, 1, -5, 5);
-      vertex(e.x + cos(angle) * r, e.y + sin(angle) * r);
-    }
-    endShape(CLOSE);
+    // Skip if off-screen
+    if (e.x + VIL_DRAW_W < camX || e.x - VIL_DRAW_W > camX + width ||
+        e.y + VIL_DRAW_H < camY || e.y - VIL_DRAW_H > camY + height) continue;
 
-    fill(10);
-    ellipse(e.x - 6, e.y - 4, 6, 6);
-    ellipse(e.x + 6, e.y - 4, 6, 6);
-    pop();
+    let row = VIL_ROWS[e.direction];
+let col = e.animFrame;
 
-    e.blobT += 0.015;
+// Apply per-frame horizontal correction
+let correctedX = e.x + VIL_XOFF[col];
+
+drawSpriteFrame(
+  villagerImg,
+  VIL_FRAME_W, VIL_FRAME_H,
+  col, row,
+  correctedX, e.y,
+  VIL_DRAW_W, VIL_DRAW_H
+);
+
   }
 }
+
 
 // ------------------------------------------------------------
 // drawBullets()
@@ -850,40 +910,63 @@ function drawBullets() {
   }
 }
 
+function animateSprite() {
+  if (player.isMoving) {
+    player.frameTimer++;
+
+    // When the timer reaches animSpeed, advance to the next frame
+    // % numFrames wraps back to 0 after the last frame
+    if (player.frameTimer >=  WEREWOLFSPRITE.animSpeed) {
+      player.frameTimer = 0;
+      player.currentFrame = (player.currentFrame + 1) % WEREWOLFSPRITE.numFrames;
+    }
+  } else {
+    // Reset to standing frame when not moving
+    player.currentFrame = 0;
+    player.frameTimer   = 0;
+  }
+}
 // ------------------------------------------------------------
 // drawPlayer()
 // Drawn in world coordinates. Flickers while invincible.
 // ------------------------------------------------------------
 function drawPlayer() {
-  if (player.invincible && floor(player.invincibleTimer / 6) % 2 === 0) return;
+  let row    = WEREWOLFSPRITE.rows[player.direction];
+  let offset = WEREWOLFSPRITE.offsets[player.direction];
 
-  push();
-  fill(0, 200, 180);
-  noStroke();
+  let sx = player.currentFrame * WEREWOLFSPRITE.frameWidth;
+  let sy = row * WEREWOLFSPRITE.frameHeight;
 
-  beginShape();
-  let numPoints = 48;
-  for (let i = 0; i < numPoints; i++) {
-    let angle    = (TWO_PI / numPoints) * i;
-    let noiseVal = noise(cos(angle) * 0.8 + player.blobT, sin(angle) * 0.8 + player.blobT);
-    let r        = player.r + map(noiseVal, 0, 1, -6, 6);
-    vertex(player.x + cos(angle) * r, player.y + sin(angle) * r);
-  }
-  endShape(CLOSE);
+  let dw = WEREWOLFSPRITE.frameWidth  * WEREWOLFSPRITE.scale;
+  let dh = WEREWOLFSPRITE.frameHeight * WEREWOLFSPRITE.scale;
 
-  fill(10);
-  ellipse(player.x - 7, player.y - 5, 7, 7);
-  ellipse(player.x + 7, player.y - 5, 7, 7);
+  // FEET-BASED ANCHOR
+  let drawX = player.x - dw/2 + offset.x;
+  let drawY = player.y - dh + offset.y;
 
-  fill(255);
-  ellipse(
-    player.x + player.direction.x * (player.r - 4),
-    player.y + player.direction.y * (player.r - 4),
-    8
+  // ⭐ Prevent sprite from going above the camera view
+  drawY = max(drawY, camY);
+
+  image(
+    werewolfImg,
+    drawX,
+    drawY,
+    dw, dh,
+    sx, sy,
+    WEREWOLFSPRITE.frameWidth,
+    WEREWOLFSPRITE.frameHeight
   );
+}
 
-  pop();
-  player.blobT += 0.015;
+function villagerDirection(ex, ey, px, py) {
+  let dx = px - ex;
+  let dy = py - ey;
+
+  if (abs(dy) > abs(dx)) {
+    return dy > 0 ? "down" : "up";
+  } else {
+    return dx > 0 ? "right" : "left";
+  }
 }
 
 // ------------------------------------------------------------
