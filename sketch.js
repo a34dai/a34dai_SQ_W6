@@ -177,11 +177,11 @@ let groundImg;
 // SOUNDS — uncomment and fill in paths to add audio
 // ------------------------------------------------------------
 let shootSounds = [];
-// let hitSound;
+let hitSound;
 let playerHitSounds = [];
-// let bossHitSound;
+let bossHitSound;
 let bossMusic;
-// let winSound;
+let winSound;
 let backgroundMusic;
 
 // ============================================================
@@ -194,17 +194,17 @@ function preload() {
   villagerImg = loadImage("assets/images/villager.png");
   groundImg = loadImage("assets/images/ground.png");
 
-  // Uncomment to load sounds:
   for (let i = 1; i <= 3; i++) {
     shootSounds.push(loadSound("assets/sounds/shoot" + i + ".mp3"));
   }
-  // hitSound       = loadSound("assets/sounds/hit.wav");
+  hitSound       = loadSound("assets/sounds/hit.mp3");
   for (let i = 1; i <= 2; i++) {
     playerHitSounds.push(loadSound("assets/sounds/hurt" + i + ".mp3"));
   }
-  // bossHitSound   = loadSound("assets/sounds/bosshit.wav");
+  bossHitSound   = loadSound("assets/sounds/bossHit.mp3");
 bossMusic      = loadSound("assets/sounds/bossMusic.mp3");
-  // winSound       = loadSound("assets/sounds/win.wav");
+  winSound       = loadSound("assets/sounds/winHowl.mp3");
+  loseSound      = loadSound("assets/sounds/loseCry.mp3");
   backgroundMusic          = loadSound("assets/sounds/background.mp3");
 }
 
@@ -335,7 +335,7 @@ function drawObstacles() {
 
     // Outer glow
     noStroke();
-    fill(240, 130, 130, glow);
+    fill(255, 100, 100, glow);
     rect(x - 4, y - 4, s + 8, s + 8, 8);
 
     // silver base
@@ -358,7 +358,7 @@ function drawObstacles() {
 
     // Hot edge highlight
     noStroke();
-    fill(240, 230, 235, 180);
+    fill(255, 180, 180, 180);
     rect(x, y, s, 3, 2);
     rect(x, y, 3, s, 2);
 
@@ -400,7 +400,11 @@ function checkObstaclePlayerCollision() {
 
       if (player.health <= 0) {
         gameState = STATE_OVER;
-        // music.stop();
+         // Stop ALL music
+  backgroundMusic.stop();
+  bossMusic.stop();
+
+  loseSound.play();
       }
       break;
     }
@@ -734,11 +738,11 @@ function checkBulletBossCollision() {
     if (d < boss.r + 6) {
       bullets.splice(i, 1);
       boss.health--;
-      // bossHitSound.play();
+      bossHitSound.play();
 
       if (boss.health <= 0) {
         gameState = STATE_WIN;
-        // winSound.play();
+        winSound.play();
         bossMusic.stop();
       }
       break;
@@ -762,7 +766,11 @@ function checkBossPlayerCollision() {
 
     if (player.health <= 0) {
       gameState = STATE_OVER;
-      bossMusic.stop();
+       // Stop ALL music
+  backgroundMusic.stop();
+  bossMusic.stop();
+
+  loseSound.play();
     }
   }
 }
@@ -784,7 +792,11 @@ function checkEnemyPlayerCollision() {
 
       if (player.health <= 0) {
         gameState = STATE_OVER;
-        // music.stop();
+         // Stop ALL music
+  backgroundMusic.stop();
+  bossMusic.stop();
+
+  loseSound.play();
       }
       break;
     }
@@ -802,7 +814,7 @@ function checkBulletEnemyCollisions() {
         bullets.splice(i, 1);
         enemies.splice(j, 1);
         score++;
-        // hitSound.play();
+        hitSound.play();
         break;
       }
     }
@@ -1116,7 +1128,7 @@ function drawBossHUD() {
   textSize(12);
   textAlign(CENTER);
   textFont("monospace");
-  text("BOSS", width / 2, barY + barH + 14);
+  text("MOLTEN SILVER BEAST", width / 2, barY + barH + 14);
 }
 
 // ------------------------------------------------------------
@@ -1173,27 +1185,46 @@ function keyPressed() {
   }
 
   // R — restart
-  if ((key === "r" || key === "R") && gameState !== STATE_PLAY && gameState !== STATE_BOSS) {
-    gameState = STATE_PLAY;
-    score     = 0;
-    nextWave  = 0;
-    bullets   = [];
-    enemies   = [];
-    boss      = null;
+  if (key === 'r' || key === 'R') {
+  // Reset player
+  player.x = WORLD_W / 2;
+  player.y = WORLD_H - 200;
+  player.health = player.maxHealth;
+  player.invincible = false;
+  player.invincibleTimer = 0;
+  player.shootTimer = 0;
+  player.currentFrame = 0;
+  player.frameTimer = 0;
+  player.direction = "down";
+  player.isMoving = false;
+  player.bounceVX = 0;
+  player.bounceVY = 0;
 
-    player.x             = WORLD_W / 2;
-    player.y             = WORLD_H - 200;
-    player.direction     = { x: 0, y: -1 };
-    player.shootTimer    = 0;
-    player.health        = player.maxHealth;
-    player.invincible    = false;
-    player.invincibleTimer = 0;
-    player.bounceVX      = 0;
-    player.bounceVY      = 0;
+  // Reset enemies + bullets
+  enemies = [];
+  bullets = [];
 
-    camX = player.x - width / 2;
-    camY = player.y - height / 2;
+  // Reset waves
+  nextWave = 0;
 
-    // music.loop();
-  }
+  // Reset boss
+  boss = null;
+
+  // Reset score
+  score = 0;
+
+  // Reset camera
+  camX = player.x - width / 2;
+  camY = player.y - height / 2;
+
+  // Reset game state
+  gameState = STATE_PLAY;
+
+  // Reset music
+  bossMusic.stop();
+  loseSound.stop();
+  backgroundMusic.loop();
+  backgroundMusic.setVolume(2);
+}
+
 }
